@@ -161,7 +161,7 @@ class databaseService {
 
   await db.transaction((txn) async {
     try {
-      // 1. Update the user's question
+      // Update the user's question
       await txn.update(
         _messagesTableName,
         {_messagesContentColumnName: newQuestion},
@@ -173,7 +173,7 @@ class databaseService {
       // answer = await fetchLLMAnswer(question); // TODO: Implement this in the future
       String answer = "allloo"; // Temporary
 
-      // 5. Update LLM's response
+      // Update LLM's response
       int botMessageId = messageId++;
       await txn.update(
         _messagesTableName,
