@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ChatService {
-  static const String _apiToken = ''; //i can't push the access token to github please contact me -Ahmad
+  static const String _apiToken = String.fromEnvironment(
+  'HF_API_TOKEN',
+  defaultValue: '',
+); //i can't push the access token to github please contact me -Ahmad
   static const String _apiUrl =
       'https://router.huggingface.co/hf-inference/models/meta-llama/Llama-3.1-8B-Instruct/v1/chat/completions';
 
