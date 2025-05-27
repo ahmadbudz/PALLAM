@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'services/chatservice.dart';
+import 'services/database_service.dart';
+import 'models/chats.dart';
+import 'models/messages.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 
@@ -26,11 +32,27 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
+  int _currentChatId = 0;
+  final ChatService _chatService = ChatService();
   final TextEditingController _controller = TextEditingController();
   final List<String> _userMessages = [];
-  final List<String> _conversations = ['محادثة 1 (اختبار)', 'محادثة 2 (اختبار)'];
+  final List<String> _botMessages = [];
+  List<Chats> _conversations = [];
 
-  void _handleSend() {
+  @override
+  void initState() {
+    super.initState();
+    _loadConversations();
+  }
+
+  Future<void> _loadConversations() async {
+    final chats = await databaseService.instance.getChats();
+    setState(() {
+      _conversations = chats;
+    });
+  }
+
+  Future<void> _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
@@ -38,66 +60,96 @@ class _ChatScreenState extends State<ChatScreen> {
       _userMessages.add(text);
       _controller.clear();
     });
-  }
 
-  void _renameConversation(int index) async {
-    final TextEditingController renameController =
-        TextEditingController(text: _conversations[index]);
-    final String? newName = await showDialog<String>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Rename Conversation'),
-          content: TextField(
-            controller: renameController,
-            autofocus: true,
-            decoration: const InputDecoration(hintText: 'Enter new name'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () =>
-                  Navigator.pop(context, renameController.text.trim()),
-              child: const Text('Rename'),
-            ),
-          ],
-        );
-      },
-    );
+    try {
+      final botReply = await _chatService.getResponse(text);
+      final updatedChatId = await databaseService.instance
+          .insertQuestionAndAnswer(text, _currentChatId, botReply);
 
-    if (newName != null && newName.isNotEmpty) {
       setState(() {
-        _conversations[index] = newName;
+        _currentChatId = updatedChatId;
+        _botMessages.add(botReply);
       });
+    } catch (e) {
+      setState(() {
+        _botMessages.add('⚠️ حدث خطأ في الاتصال بالنموذج.');
+      });
+      print('Error from model: $e');
     }
   }
 
-  void _deleteConversation(int index) {
-    showDialog(
+  Future<void> _createNewConversation() async {
+    final newId = await databaseService.instance.createChat('New Chat');
+    await _loadConversations();
+    setState(() {
+      _currentChatId = newId;
+      _userMessages.clear();
+      _botMessages.clear();
+    });
+    Navigator.pop(context);
+  }
+
+  Future<void> _selectConversation(int index) async {
+    final chat = _conversations[index];
+    setState(() {
+      _currentChatId = chat.chat_id;
+      _userMessages.clear();
+      _botMessages.clear();
+    });
+
+    final messages = await databaseService.instance.getMessages();
+    for (var msg in messages.where((m) => m.chat_id == _currentChatId)) {
+      if (msg.sender == 'user') {
+        _userMessages.add(msg.content);
+      } else {
+        _botMessages.add(msg.content);
+      }
+    }
+    Navigator.pop(context);
+  }
+
+  Future<void> _renameConversation(int index) async {
+    final chats = await databaseService.instance.getChats();
+    final id = chats[index].chat_id;
+    final controller = TextEditingController(text: chats[index].chat_name);
+    final newName = await showDialog<String>(
       context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Delete Conversation'),
-        content: const Text('Are you sure you want to delete this conversation?'),
+      builder: (_) => AlertDialog(
+        title: const Text('Rename Conversation'),
+        content: TextField(controller: controller, decoration: const InputDecoration(hintText: 'Enter new name')),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _conversations.removeAt(index);
-              });
-              Navigator.pop(context);
-            },
-            child: const Text('Delete'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Rename')),
         ],
       ),
     );
+    if (newName != null && newName.isNotEmpty) {
+      await databaseService.instance.renameChat(id, newName);
+      await _loadConversations();
+    }
+  }
+
+  Future<void> _deleteConversation(int index) async {
+    final chats = await databaseService.instance.getChats();
+    final id = chats[index].chat_id;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete Conversation'),
+        content: const Text('Are you sure you want to delete this conversation?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await databaseService.instance.deleteChat(id);
+      await _loadConversations();
+      if (_currentChatId == id) {
+        setState(() { _currentChatId = 0; _userMessages.clear(); _botMessages.clear(); });
+      }
+    }
   }
 
   @override
@@ -105,138 +157,92 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: Builder(
-          builder: (BuildContext context) => IconButton(
+          builder: (ctx) => IconButton(
             icon: const Icon(Icons.menu, color: Colors.white),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
           ),
         ),
         backgroundColor: const Color(0xFF597157),
         title: const Text(
           'ℙ𝔸𝕃𝕃𝔸𝕄',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 2,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: 2, color: Colors.white),
         ),
         centerTitle: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
-        ),
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(20))),
       ),
       drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(
-                color: Color(0xFF597157),
+        child: ListView(padding: EdgeInsets.zero, children: [
+          const DrawerHeader(
+            decoration: BoxDecoration(color: Color(0xFF597157)),
+            child: Text('Conversations', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+          ),
+          ListTile(leading: const Icon(Icons.add), title: const Text('New Conversation'), onTap: _createNewConversation),
+          const Divider(),
+          for (int i = 0; i < _conversations.length; i++)
+            ListTile(
+              leading: const Icon(Icons.chat_bubble_outline),
+              title: Text(_conversations[i].chat_name),
+              trailing: PopupMenuButton<String>(
+                onSelected: (val) { if (val=='rename') _renameConversation(i); else if(val=='delete') _deleteConversation(i); },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                ],
               ),
-              child: Text(
-                'Previous Conversations',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              onTap: () => _selectConversation(i),
             ),
-            for (int i = 0; i < _conversations.length; i++)
-              ListTile(
-                title: Text(_conversations[i]),
-                leading: const Icon(Icons.history),
-                trailing: PopupMenuButton<String>(
-                  onSelected: (value) {
-                    if (value == 'rename') {
-                      _renameConversation(i);
-                    } else if (value == 'delete') {
-                      _deleteConversation(i);
-                    }
-                  },
-                  itemBuilder: (BuildContext context) => [
-                    const PopupMenuItem(value: 'rename', child: Text('Rename')),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                  ],
-                ),
-              ),
-          ],
-        ),
+        ]),
       ),
       backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: Center(
-              child: Image.asset(
-                'images/palestine.png',
-                height: 400, 
-                fit: BoxFit.cover, 
-              ),
+      body: Stack(children: [
+        Positioned.fill(
+          child: Center(child: Image.asset('images/palestine.png', height: 400, fit: BoxFit.cover)),
+        ),
+        Column(children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              reverse: false,
+              itemCount: _userMessages.length + _botMessages.length,
+              itemBuilder: (ctx, index) {
+                final isUser = index.isEven;
+                final msgIndex = index ~/ 2;
+                final message = isUser ? _userMessages[msgIndex] : (_botMessages.length>msgIndex? _botMessages[msgIndex] : '');
+                return Align(
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    padding: const EdgeInsets.all(12),
+                    constraints: const BoxConstraints(maxWidth: 300),
+                    decoration: BoxDecoration(
+                      color: isUser ? const Color(0xFF597157) : Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Text(message, style: TextStyle(color: isUser?Colors.white:Colors.black87), textAlign: TextAlign.right),
+                  ),
+                );
+              },
             ),
           ),
-          Column(
-            children: [
-              // Chat messages list
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: const BoxDecoration(color: Color(0xFF597157), borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+            child: Row(children: [
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  reverse: true,
-                  itemCount: _userMessages.length,
-                  itemBuilder: (context, index) {
-                    final reversedIndex = _userMessages.length - 1 - index;
-                    return Align(
-                      alignment: Alignment.centerRight,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 6),
-                        padding: const EdgeInsets.all(12),
-                        constraints: const BoxConstraints(maxWidth: 300),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF597157),
-                          borderRadius: BorderRadius.circular(15),
-                        ),
-                        child: Text(
-                          _userMessages[reversedIndex],
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    );
-                  },
+                child: TextField(
+                  controller: _controller,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(color: Colors.white),
+                  textInputAction: TextInputAction.send,
+                  decoration: const InputDecoration(hintText: 'ما الذي يدور في ذهنك حول جغرافية فلسطين؟', hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
+                  onSubmitted: (_) => _handleSend(),
                 ),
               ),
-              // Input field
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF597157),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          hintText: 'ما الذي يدور في ذهنك حول جغرافية فلسطين؟',
-                          hintStyle: TextStyle(color: Colors.white70),
-                          border: InputBorder.none,
-                        ),
-                        onSubmitted: (_) => _handleSend(),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.send, color: Colors.white),
-                      onPressed: _handleSend,
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _handleSend),
+            ]),
           ),
-        ],
-      ),
+        ]),
+      ]),
     );
   }
 }
