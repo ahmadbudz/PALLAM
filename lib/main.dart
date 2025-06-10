@@ -4,6 +4,7 @@ import 'services/chatservice.dart';
 import 'services/database_service.dart';
 import 'models/chats.dart';
 import 'models/messages.dart';
+import 'package:flutter/services.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -205,21 +206,52 @@ class _ChatScreenState extends State<ChatScreen> {
               reverse: false,
               itemCount: _userMessages.length + _botMessages.length,
               itemBuilder: (ctx, index) {
-                final isUser = index.isEven;
-                final msgIndex = index ~/ 2;
-                final message = isUser ? _userMessages[msgIndex] : (_botMessages.length>msgIndex? _botMessages[msgIndex] : '');
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    padding: const EdgeInsets.all(12),
-                    constraints: const BoxConstraints(maxWidth: 300),
-                    decoration: BoxDecoration(
-                      color: isUser ? const Color(0xFF597157) : Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(15),
+              final isUser = index.isEven;
+              final msgIndex = index ~/ 2;
+              final message = isUser
+                  ? _userMessages[msgIndex]
+                  : (_botMessages.length > msgIndex ? _botMessages[msgIndex] : '');
+
+              return Align(
+                alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment:
+                      isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.all(12),
+                      constraints: BoxConstraints(maxWidth: 300),
+                      decoration: BoxDecoration(
+                        color: isUser ? const Color(0xFF597157) : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Text(
+                        message,
+                        style: TextStyle(
+                          color: isUser ? Colors.white : Colors.black87,
+                          fontSize: 16,
+                          height: 1.3,
+                        ),
+                        textAlign: isUser ? TextAlign.right : TextAlign.left,
+                      ),
                     ),
-                    child: Text(message, style: TextStyle(color: isUser?Colors.white:Colors.black87), textAlign: TextAlign.right),
-                  ),
+
+                    if (!isUser)
+                      IconButton(
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: message));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Copied to clipboard!')),
+                          );
+                        },
+                      ),
+                  ],
+                ),
                 );
               },
             ),
