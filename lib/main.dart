@@ -40,6 +40,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<String> _botMessages = [];
   List<Chats> _conversations = [];
 
+  bool _waitingForResponse = false;  // variable to check the state of the response 
+
   @override
   void initState() {
     super.initState();
@@ -60,6 +62,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _userMessages.add(text);
       _controller.clear();
+      _waitingForResponse = true;  // for disable the input until return the respnse 
     });
 
     try {
@@ -70,10 +73,12 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _currentChatId = updatedChatId;
         _botMessages.add(botReply);
+        _waitingForResponse = false;  //  re-enable the input
       });
     } catch (e) {
       setState(() {
         _botMessages.add('⚠️ حدث خطأ في الاتصال بالنموذج.');
+        _waitingForResponse = false; 
       });
       print('Error from model: $e');
     }
@@ -263,14 +268,24 @@ class _ChatScreenState extends State<ChatScreen> {
               Expanded(
                 child: TextField(
                   controller: _controller,
+                  enabled: !_waitingForResponse, //disable typing while waiting
                   textAlign: TextAlign.right,
                   style: const TextStyle(color: Colors.white),
                   textInputAction: TextInputAction.send,
                   decoration: const InputDecoration(hintText: 'ما الذي يدور في ذهنك حول جغرافية فلسطين؟', hintStyle: TextStyle(color: Colors.white70), border: InputBorder.none),
-                  onSubmitted: (_) => _handleSend(),
+                   onSubmitted: !_waitingForResponse ? (_) => _handleSend() : null, // disable enter-send
                 ),
               ),
-              IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _handleSend),
+              IconButton(
+                icon: _waitingForResponse
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send, color: Colors.white),
+                onPressed: _waitingForResponse ? null : _handleSend, // disable send button
+              ),
             ]),
           ),
         ]),
