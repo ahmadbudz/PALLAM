@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'services/chatservice.dart';
+import 'services/chatService.dart';
 import 'services/database_service.dart';
 import 'models/chats.dart';
 import 'models/messages.dart';
